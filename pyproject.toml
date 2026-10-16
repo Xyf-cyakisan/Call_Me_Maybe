@@ -12,7 +12,8 @@ dependencies = [
     "flake8>=7.3.0",
     "mypy>=2.1.0",
     "pydantic>=2.14.1",
-    "argparse>=1.4.0"
+    "argparse>=1.4.0",
+    "colorama>=0.4.6"
 ]
 
 [tool.uv.sources]
