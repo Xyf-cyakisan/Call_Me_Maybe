@@ -8,6 +8,7 @@ from colorama import Fore, Style
 
 def main() -> None:
     try:
+        print("\033c")
         arg_parser = ArgumentParser()
         arg_parser.add_argument("--functions_definition",
                                 type=str,
@@ -32,12 +33,13 @@ def main() -> None:
     except json.JSONDecodeError as json_err:
         print(Fore.RED, f"ERROR: {json_err}", Style.RESET_ALL)
         sys.exit(3)
+    except ValidationError as valid_errs:
+        for err in valid_errs.errors():
+            print(Fore.RED, f"ERROR: {err['input']} is not valid",
+                  Style.RESET_ALL)
+        sys.exit(4)
     except ValueError as val_err:
         print(Fore.RED, f"ERROR: {val_err}", Style.RESET_ALL)
-        sys.exit(4)
-    except ValidationError as valid_errs:
-        for err in valid_errs:
-            print(Fore.RED, f"ERROR: {err}", Style.RESET_ALL)
         sys.exit(5)
 
 

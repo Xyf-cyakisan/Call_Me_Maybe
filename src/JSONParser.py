@@ -3,6 +3,7 @@ import json
 from typing import Any
 from .models import Prompt
 from .models import Function
+from pathlib import Path
 
 
 class JSONParser(BaseModel):
@@ -14,21 +15,40 @@ class JSONParser(BaseModel):
         try:
             with open(file_name, encoding="utf-8") as json_file:
                 return json.load(json_file)
-        except json.JSONDecodeError:
-            raise json.JSONDecodeError(f"Invalid JSON '{file_name}'")
+        except UnicodeDecodeError:
+            raise ValueError(
+                f"Invalid UTF-8 file '{file_name}'"
+            )
+        except json.JSONDecodeError as json_err:
+            raise json.JSONDecodeError(
+                f"Invalid JSON '{file_name}'",
+                json_err.doc,
+                json_err.pos) from json_err
         except FileNotFoundError:
             raise FileNotFoundError(f"File '{file_name}' not found")
         except PermissionError:
             raise PermissionError(f"Cannot access file '{file_name}' because "
                                   "of permissions")
 
-    def parse(
-            self) -> tuple[list[Prompt], list[Function]]:
+    def __create_output_file(self) -> None:
         if not self.calls_json_file_name.lower().endswith(".json"):
             raise ValueError("Filename must have a .json extension")
-        return (
+        path = Path(self.calls_json_file_name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with path.open("w") as output_f:
+                output_f.write("")
+        except PermissionError:
+            raise PermissionError(f"Cannot access file '{path}' because "
+                                  "of permissions")
+
+    def parse(
+            self) -> tuple[list[Prompt], list[Function]]:
+        objects = (
             [Function(**func_def) for func_def in self.__read_json_file(
                 self.func_definition_file_name)],
             [Prompt(**prompt) for prompt in self.__read_json_file(
                 self.calling_tests_file_name)]
         )
+        self.__create_output_file()
+        return objects

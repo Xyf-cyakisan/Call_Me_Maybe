@@ -1,11 +1,13 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Literal, TypedDict, Annotated
+from typing import Annotated
 
 NonEmptyString = Annotated[str, Field(min_length=1)]
 
 
-class Parameters(TypedDict):
-    type: Literal["string", "number", "boolean"]
+class Type(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: NonEmptyString
 
 
 class Function(BaseModel):
@@ -13,14 +15,11 @@ class Function(BaseModel):
 
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
-    parameters: dict[NonEmptyString, Parameters]
-    returns: Parameters
+    parameters: dict[NonEmptyString, Type]
+    returns: Type
 
 
 class Prompt(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     prompt: str = Field(min_length=1)
-
-    def get_prompt(self) -> str:
-        return self.prompt

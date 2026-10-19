@@ -1,2 +1,12 @@
 .venv
 uv.lock
+__pycache__
+*/__pycache__
+*/*/__pycache__
+.mypy_cache
+*/.mypy_cache
+*/*/.mypy_cache
+.pytest_cache
+*/.pytest_cache
+*/*/.pytest_cache
+.vscode
