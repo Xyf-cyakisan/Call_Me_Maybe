@@ -17,7 +17,7 @@ class LLMOrchestrator(BaseModel):
             context += f"Prompt: {prompt.prompt}\n\n"
             context += ("Select the most appropriate function from the"
                         "list above.\n")
-            context += "Return only the function name."
+            context += "Return only the function name.\n"
             context += "Function:"
             yield context
 
@@ -26,23 +26,30 @@ class LLMOrchestrator(BaseModel):
 
     def __set_tokenized_funcs(self) -> None:
         self.__tokenized_funcs: dict[str, list[int]] = {
-            func.name: self.__llm.encode(func.name) for func in self.functions}
+            func.name: self.__llm.encode(func.name)[0].tolist()
+            for func in self.functions}
 
     def run_llm(self) -> None:
         self.__set_llm()
         self.__set_tokenized_funcs()
-        for context in self.__build_contexts():
+        for i, context in enumerate(self.__build_contexts(), start=1):
             tokenized_context = self.__llm.encode(context)[0].tolist()
             tokenized_answer = []
+            print(f"Context {i}")
+            print(context)
             while True:
+                allowed_ids = []
                 logits = self.__llm.get_logits_from_input_ids(
                         tokenized_context + tokenized_answer
                 )
-                print(context)
-                print([
-                    (self.__llm.decode([token_id]), int(logits[token_id]))
-                    for token_id in top_tokens
-                ])
-                if self.__llm.decode(tokenized_answer) in self.__tokenized_funcs.keys():
+                for tokened_func in self.__tokenized_funcs.values():
+                    if (len(tokened_func) >= len(tokenized_answer)
+                        and tokenized_answer == tokened_func[:len(tokenized_answer)]):
+                        allowed_ids.append(tokened_func[len(tokenized_answer)])
+                next_token_id = logits.index((max([logits[allowed_id]
+                                                   for allowed_id in
+                                                   allowed_ids])))
+                tokenized_answer.append(next_token_id)
+                if tokenized_answer in self.__tokenized_funcs.values():
                     print(f"Answer: {self.__llm.decode(tokenized_answer)}\n\n")
                     break

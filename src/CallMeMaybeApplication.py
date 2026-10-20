@@ -26,10 +26,3 @@ class CallMeMaybeApplication(BaseModel):
         funcs, prompts = self.__parser.parse()
         self.__create_orchestrator(funcs, prompts)
         self.__orchestrator.run_llm()
-        # print("Parsed functions:")
-        # for func in funcs:
-        #     print(func.model_dump_json(indent=2))
-
-        # print("Parsed prompts:")
-        # for prompt in prompts:
-        #     print(prompt.model_dump_json(indent=2))

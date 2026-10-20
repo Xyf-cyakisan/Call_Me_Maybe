@@ -27,6 +27,7 @@ clean:
 fclean: clean
 	rm -rf .venv
 	rm -rf uv.lock
+	uv cache clean
 
 debug:
 	uv run python -m pdb -m src $(ARGS)
