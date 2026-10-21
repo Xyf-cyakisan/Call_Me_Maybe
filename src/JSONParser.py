@@ -45,7 +45,8 @@ class JSONParser(BaseModel):
     def parse(
             self) -> tuple[list[Prompt], list[Function]]:
         objects = (
-            [Function(**func_def) for func_def in self.__read_json_file(
+            [Function(**func_def)
+             for func_def in self.__read_json_file(
                 self.func_definition_file_name)],
             [Prompt(**prompt) for prompt in self.__read_json_file(
                 self.calling_tests_file_name)]
