@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import json
 import re
 from llm_sdk import Small_LLM_Model
 from .models import Function
@@ -8,7 +9,7 @@ class ParametersDecoder(ABC):
     @abstractmethod
     def constrained_decode(self, para: str, func: Function, prompt: str,
                            llm: Small_LLM_Model,
-                           current_context: list[int], current_answer: list[
+                           current_cont: list[int], current_answer: list[
                                int]) -> tuple[bool, list[int]]:
         pass
 
@@ -36,19 +37,20 @@ class NumberDecoder(ParametersDecoder):
                                      re.findall(r"-?\d+(?:\.\d+)?",
                                                 prompt)]
 
-    def constrained_decode(self, para: str, func: Function, prompt: str,
-                           llm: Small_LLM_Model,
-                           current_context: list[int], current_answer: list[
+    def constrained_decode(self, values: dict[str, object],
+                           para: str, func: Function, prompt: str,
+                           llm: Small_LLM_Model, current_cont: list[int],
+                           current_answer: list[
                                int]) -> tuple[bool, list[int]]:
         end = False
         para_name_ids = llm.encode('"' + para + '"')[0].tolist()
         for id in para_name_ids:
-            current_answer.append(self._get_next_token_id(current_context,
+            current_answer.append(self._get_next_token_id(current_cont,
                                   current_answer, id, llm))
 
         between_ids = llm.encode(": ")[0].tolist()
         for between_id in between_ids:
-            current_answer.append(self._get_next_token_id(current_context,
+            current_answer.append(self._get_next_token_id(current_cont,
                                   current_answer, between_id, llm))
 
         self.__extract_numbers(prompt, llm)
@@ -59,71 +61,73 @@ class NumberDecoder(ParametersDecoder):
                 if (len(number_id) >= len(str_number)
                    and str_number == number_id[:len(str_number)]):
                     allowed_ids.append(number_id[len(str_number)])
-            str_number.append(self._get_next_token_id(current_context,
-                                                      current_answer
-                                                      + str_number,
+            str_number.append(self._get_next_token_id(current_cont,
+                                                      str_number,
                                                       allowed_ids, llm))
             if (llm.decode([str_number[-1]]) == "\n"
                and str_number in self.__allowed_numbers_id):
                 current_answer += str_number[:-1]
                 break
+        values.update(json.loads(llm.decode(current_answer) + "}"))
         if list(func.parameters.keys())[-1] == para:
             end = True
         else:
             end_ids = llm.encode(", ")[0].tolist()
             for end_id in end_ids:
-                current_answer.append(self._get_next_token_id(current_context,
+                current_answer.append(self._get_next_token_id(current_cont,
                                       current_answer, end_id, llm))
-        return (end, current_answer)
+        return (end, current_answer, values)
 
 
 class StringDecoder(ParametersDecoder):
-    def __extract_strings(self, prompt: str, llm: Small_LLM_Model) -> None:
-        self.__allowed_strings_ids = [number for number in range(151927)]
+    def __extract_allowed_ids(self, llm: Small_LLM_Model) -> None:
+        self.__allowed_strings_ids = [number for number in range(151927)
+                                      if "\\" not in llm.decode(number)
+                                      if '"' not in llm.decode(number)
+                                      if "'" not in llm.decode(number)]
 
-    def constrained_decode(self, para: str, func: Function, prompt: str,
-                           llm: Small_LLM_Model,
-                           current_context: list[int], current_answer: list[
+    def constrained_decode(self, values: dict[str, object],
+                           para: str, func: Function, prompt: str,
+                           llm: Small_LLM_Model, current_cont: list[int],
+                           current_answer: list[
                                int]) -> tuple[bool, list[int]]:
         end = False
         para_name_ids = llm.encode('"' + para + '"')[0].tolist()
         for id in para_name_ids:
-            current_answer.append(self._get_next_token_id(current_context,
+            current_answer.append(self._get_next_token_id(current_cont,
                                   current_answer, id, llm))
-
         between_ids = llm.encode(": ")[0].tolist()
         for between_id in between_ids:
-            current_answer.append(self._get_next_token_id(current_context,
+            current_answer.append(self._get_next_token_id(current_cont,
                                   current_answer, between_id, llm))
-
-        self.__extract_strings(prompt, llm)
+        self.__extract_allowed_ids(llm)
         string = []
         quote_id = llm.encode('"')[0].tolist()
         for id in quote_id:
-            current_answer.append(self._get_next_token_id(current_context,
+            current_answer.append(self._get_next_token_id(current_cont,
                                   current_answer, id, llm))
-        end = llm.encode("\n")[0].tolist()
         while True:
-            string.append(self._get_next_token_id(current_context,
-                                                  current_answer
-                                                  + string,
+            string.append(self._get_next_token_id(current_cont,
+                                                  string,
                                                   self.__allowed_strings_ids,
                                                   llm))
-            if (string[-1] == end):
+            if ("\n" in llm.decode(string[-1])):
                 string = string[:-1]
                 for id in quote_id:
                     string.append(self._get_next_token_id(
-                        current_context, current_answer + string, id, llm))
+                        current_cont, current_answer + string, id, llm))
                 current_answer += string
                 break
+        decoded = llm.decode(current_answer) + "}"
+        values.update(json.loads(decoded))
         if list(func.parameters.keys())[-1] == para:
             end = True
         else:
             end_ids = llm.encode(", ")[0].tolist()
             for end_id in end_ids:
-                current_answer.append(self._get_next_token_id(current_context,
+                current_answer.append(self._get_next_token_id(current_cont,
                                       current_answer, end_id, llm))
-        return (end, current_answer)
+        return (end, current_answer, values)
 
 
 class BoolDecoder(ParametersDecoder):

@@ -24,33 +24,38 @@ class LLMOrchestrator(BaseModel):
             context += "Function: "
             yield context
 
-    def __build_parameters_contexts(self, funcs_name: list[str]
-                                    ) -> Generator[str]:
-        for prompt, func_name in zip(self.prompts, funcs_name):
-            func = next(
-                func for func in self.functions
-                if func.name == func_name
-            )
-            context = f"Function: {func.name}\n"
-            context += f"Description: {func.description}\n"
-            context += f"Parameters: {func.parameters}\n\n"
-            context += f"Prompt: {prompt.prompt}\n\n"
-            context += (
-                "Extract the parameter values required by the function "
-                "from the prompt.\n"
-            )
-            context += (
-                "Return only a valid JSON object containing the "
-                "parameters defined by the function.\n"
-            )
-            context += (
-                "Do not include the function name or any additional text.\n"
-            )
-            context += (
-                "Parameter value must end with a newline character.\n"
-            )
-            context += "Parameters: "
-            yield context
+    def __build_parameter_context(
+        self,
+        prompt: str,
+        function: Function,
+        parameter: str,
+        values: dict[str, object],
+    ) -> str:
+        context = ""
+
+        context += f"Prompt: {prompt}\n"
+        context += f"Function: {function.name}\n"
+        context += f"Description: {function.description}\n"
+
+        context += "Function signature: "
+        context += f"{function.name}("
+
+        parameters = []
+
+        for name, definition in function.parameters.items():
+            parameters.append(f"{name}: {definition.type}")
+
+        context += ", ".join(parameters)
+        context += ")\n"
+
+        context += "Arguments already generated:\n"
+
+        for name, value in values.items():
+            context += f"{name}={value}\n"
+
+        context += f"{parameter}="
+
+        return context
 
     def __set_llm(self) -> None:
         self.__llm = Small_LLM_Model()
@@ -93,18 +98,20 @@ class LLMOrchestrator(BaseModel):
                     if func.name == str_func:
                         return func
 
-    def __get_parameters(self, context: str, func: Function, prompt: str
-                         ) -> str:
-        tokenized_context = self.__llm.encode(context)[0].tolist()
+    def __get_parameters(self, func: Function, prompt: str) -> str:
         tokenized_answer = []
         beginning = True
         end = False
-        parameters = iter(func.parameters.keys())
+        parameters = list(func.parameters.keys())
+        values = {}
+        index = 0
         while True:
-            allowed_ids = []
-            logits = self.__llm.get_logits_from_input_ids(
-                    tokenized_context + tokenized_answer
-            )
+            if index < len(parameters):
+                tokenized_context = (self.__llm.encode(self.__build_parameter_context(prompt, func, parameters[index], values))[0].tolist())
+                allowed_ids = []
+                logits = self.__llm.get_logits_from_input_ids(
+                        tokenized_context + tokenized_answer
+                )
             if beginning:
                 allowed_ids = [self.__llm.encode("{")]
                 beginning = not beginning
@@ -120,16 +127,16 @@ class LLMOrchestrator(BaseModel):
                 tokenized_answer.append(next_token_id)
                 return (self.__llm.decode(tokenized_answer))
             else:
-                parameter = next(parameters)
-
                 result = self.__parameters_decoders[
-                    func.parameters[parameter].type
+                    func.parameters[parameters[index]].type
                     ].constrained_decode(
-                    parameter, func, prompt.prompt,
-                    self.get_llm(), tokenized_context,
-                    tokenized_answer
+                        values,
+                        parameters[index], func, prompt.prompt,
+                        self.get_llm(), tokenized_context,
+                        tokenized_answer
                 )
-                end, tokenized_answer = result
+                end, tokenized_answer, values = result
+                index += 1
 
     def __create_functions_calls_objects(self, funcs_name: list[str],
                                          prompts: list[str],
@@ -155,12 +162,11 @@ class LLMOrchestrator(BaseModel):
             functions_calls_data["funcs_name"].append(self.__get_func_name(
                 func_name_context))
         funcs_name = [func.name for func in functions_calls_data["funcs_name"]]
-        parameters_gen = zip(functions_calls_data["funcs_name"],
-                             self.prompts, (self.__build_parameters_contexts(
-                                 funcs_name)))
-        for func, prompt, parameters_context in parameters_gen:
-            functions_calls_data["parameters"].append(self.__get_parameters(
-                parameters_context, func, prompt))
+        parameters_gen = zip(functions_calls_data["funcs_name"], self.prompts)
+        for func, prompt in parameters_gen:
+            result = self.__get_parameters(
+                func, prompt)
+            functions_calls_data["parameters"].append(result)
         for prompt in self.prompts:
             functions_calls_data["prompts"].append(prompt.prompt)
         functions_calls_data["funcs_name"] = funcs_name
