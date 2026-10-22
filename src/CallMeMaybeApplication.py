@@ -26,7 +26,8 @@ class CallMeMaybeApplication(BaseModel):
         self.__create_parser()
         funcs, prompts = self.__parser.parse()
         self.__create_orchestrator(funcs, prompts)
+        result = [call.model_dump(mode="json") for call
+                  in self.__orchestrator.run_llm()]
         with open(self.__parser.calls_json_file_name, "w") as output_json:
-            json.dump([call.model_dump(mode="json") for call
-                       in self.__orchestrator.run_llm()],
+            json.dump(result,
                       output_json, indent=4)

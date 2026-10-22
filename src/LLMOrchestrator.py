@@ -88,7 +88,10 @@ class LLMOrchestrator(BaseModel):
                                               allowed_ids])))
             tokenized_answer.append(next_token_id)
             if tokenized_answer in self.__tokenized_funcs.values():
-                return (self.__llm.decode(tokenized_answer[:-1]))
+                str_func = self.__llm.decode(tokenized_answer[:-1])
+                for func in self.functions:
+                    if func.name == str_func:
+                        return func
 
     def __get_parameters(self, context: str, func: Function, prompt: str
                          ) -> str:
@@ -118,13 +121,15 @@ class LLMOrchestrator(BaseModel):
                 return (self.__llm.decode(tokenized_answer))
             else:
                 parameter = next(parameters)
-                end, tokenized_answer = self.__parameters_decoders[
+
+                result = self.__parameters_decoders[
                     func.parameters[parameter].type
                     ].constrained_decode(
                     parameter, func, prompt.prompt,
                     self.get_llm(), tokenized_context,
                     tokenized_answer
                 )
+                end, tokenized_answer = result
 
     def __create_functions_calls_objects(self, funcs_name: list[str],
                                          prompts: list[str],
@@ -149,13 +154,14 @@ class LLMOrchestrator(BaseModel):
         for func_name_context in self.__build_funcs_name_contexts():
             functions_calls_data["funcs_name"].append(self.__get_func_name(
                 func_name_context))
-        parameters_gen = zip(self.functions,
+        funcs_name = [func.name for func in functions_calls_data["funcs_name"]]
+        parameters_gen = zip(functions_calls_data["funcs_name"],
                              self.prompts, (self.__build_parameters_contexts(
-                                                        functions_calls_data[
-                                                            "funcs_name"])))
+                                 funcs_name)))
         for func, prompt, parameters_context in parameters_gen:
             functions_calls_data["parameters"].append(self.__get_parameters(
                 parameters_context, func, prompt))
         for prompt in self.prompts:
             functions_calls_data["prompts"].append(prompt.prompt)
+        functions_calls_data["funcs_name"] = funcs_name
         return (self.__create_functions_calls_objects(**functions_calls_data))
