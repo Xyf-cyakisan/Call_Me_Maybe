@@ -41,6 +41,9 @@ def main() -> None:
     except ValueError as val_err:
         print(Fore.RED, f"ERROR: {val_err}", Style.RESET_ALL)
         sys.exit(5)
+    except KeyboardInterrupt:
+        print(Fore.BLUE, "Bye-bye", Style.RESET_ALL)
+        sys.exit(5)
 
 
 if __name__ == "__main__":

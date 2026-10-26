@@ -1,4 +1,5 @@
 from typing import Generator
+from collections import defaultdict
 from pydantic import BaseModel
 from .parameters_decoders import BoolDecoder, NumberDecoder, StringDecoder
 from .output_models import FunctionCall
@@ -66,11 +67,9 @@ class LLMOrchestrator(BaseModel):
             for func in self.functions}
 
     def __set_parameters_decoders(self) -> None:
-        self.__parameters_decoders = {
-            "number": NumberDecoder(),
-            "string": StringDecoder(),
-            "boolean": BoolDecoder()
-        }
+        self.__parameters_decoders = defaultdict(BoolDecoder)
+        self.__parameters_decoders["string"] = StringDecoder
+        self.__parameters_decoders["number"] = NumberDecoder
 
     def get_llm(self) -> Small_LLM_Model:
         return self.__llm
