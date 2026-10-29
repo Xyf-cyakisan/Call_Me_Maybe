@@ -1,248 +1,325 @@
-import token
-from typing import Any
-from llm_sdk import Small_LLM_Model
-from .input_models import Function
-from pydantic import BaseModel
+"""Generate schema-compliant JSON arguments with constrained decoding."""
+
+import heapq
 import json
-import re
+import math
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, ClassVar
+
+from llm_sdk import Small_LLM_Model
+from pydantic import BaseModel, field_validator
+
+from .input_models import Function
+
+
+class JsonPrefixChecker(BaseModel):
+
+    parameters: dict[str, str]
+
+    @field_validator("parameters")
+    @classmethod
+    def check_types(cls, parameters: dict[str, str]) -> dict[str, str]:
+        allowed = {"string", "number", "integer", "boolean"}
+        for name, type_name in parameters.items():
+            if not name or type_name not in allowed:
+                raise ValueError(f"Invalid parameter: {name!r} ({type_name})")
+        return parameters
+
+    @staticmethod
+    def _spaces(text: str, position: int) -> int:
+        while position < len(text) and text[position] in " \t\r\n":
+            position += 1
+        return position
+
+    @staticmethod
+    def _string(text: str, position: int) -> tuple[int, int, str]:
+        """Return (status, next position, decoded value)."""
+        if position == len(text):
+            return -1, position, ""
+        if text[position] != '"':
+            return -2, position, ""
+
+        start = position
+        position += 1
+        while position < len(text):
+            char = text[position]
+            if char == '"':
+                position += 1
+                try:
+                    value = json.loads(text[start:position])
+                except json.JSONDecodeError:
+                    return -2, position, ""
+                return 0, position, value
+            if ord(char) < 32:
+                return -2, position, ""
+            if char == "\\":
+                position += 1
+                if position == len(text):
+                    return -1, position, ""
+                if text[position] == "u":
+                    for offset in range(1, 5):
+                        index = position + offset
+                        if index == len(text):
+                            return -1, index, ""
+                        if text[index] not in "0123456789abcdefABCDEF":
+                            return -2, index, ""
+                    position += 4
+                elif text[position] not in '"\\/bfnrt':
+                    return -2, position, ""
+            position += 1
+        return -1, position, ""
+
+    @staticmethod
+    def _number(text: str, position: int, integer: bool) -> tuple[int, int]:
+        """Validate JSON number syntax, requiring a following separator."""
+        size = len(text)
+        if position == size:
+            return -1, position
+        if text[position] == "-":
+            position += 1
+            if position == size:
+                return -1, position
+
+        if text[position] == "0":
+            position += 1
+            if position < size and text[position].isdigit():
+                return -2, position
+        elif text[position] in "123456789":
+            position += 1
+            while position < size and text[position] in "0123456789":
+                position += 1
+        else:
+            return -2, position
+
+        if not integer and position < size and text[position] == ".":
+            position += 1
+            if position == size:
+                return -1, position
+            if text[position] not in "0123456789":
+                return -2, position
+            while position < size and text[position] in "0123456789":
+                position += 1
+
+        if not integer and position < size and text[position] in "eE":
+            position += 1
+            if position == size:
+                return -1, position
+            if text[position] in "+-":
+                position += 1
+                if position == size:
+                    return -1, position
+            if text[position] not in "0123456789":
+                return -2, position
+            while position < size and text[position] in "0123456789":
+                position += 1
+
+        if position == size:
+            return -1, position
+        if text[position] not in " \t\r\n,}":
+            return -2, position
+        return 0, position
+
+    @staticmethod
+    def _boolean(text: str, position: int) -> tuple[int, int]:
+        """Check the prefix of a true/false literal."""
+        expected = "true" if text[position:position + 1] == "t" else "false"
+        for char in expected:
+            if position == len(text):
+                return -1, position
+            if text[position] != char:
+                return -2, position
+            position += 1
+        if position < len(text) and text[position] not in " \t\r\n,}":
+            return -2, position
+        return 0, position
+
+    def _possible_key(self, text: str, used: set[str]) -> bool:
+        """Reject impossible plain prefixes; defer unfinished escapes."""
+        plain = text.split("\\", 1)[0]
+        return any(
+            name not in used and name.startswith(plain)
+            for name in self.parameters
+        )
+
+    def status(self, text: str) -> int:
+        """0: complete; -1: valid unfinished prefix; -2: impossible."""
+        position = self._spaces(text, 0)
+        if position == len(text):
+            return -1
+        if text[position] != "{":
+            return -2
+        position += 1
+        used: set[str] = set()
+        need_key = False
+
+        while True:
+            position = self._spaces(text, position)
+            if position == len(text):
+                return -1
+            if text[position] == "}" and not need_key:
+                position += 1
+                position = self._spaces(text, position)
+                if position != len(text):
+                    return -2
+                return 0 if used == self.parameters.keys() else -2
+
+            if text[position] != '"' or len(used) == len(self.parameters):
+                return -2
+            start = position
+            status, position, key = self._string(text, position)
+            if status == -2:
+                return -2
+            if status == -1:
+                return (-1 if self._possible_key(text[start + 1:], used)
+                        else -2)
+            if key not in self.parameters or key in used:
+                return -2
+            used.add(key)
+
+            position = self._spaces(text, position)
+            if position == len(text):
+                return -1
+            if text[position] != ":":
+                return -2
+            position = self._spaces(text, position + 1)
+            if position == len(text):
+                return -1
+
+            type_name = self.parameters[key]
+            if type_name == "string":
+                result, position, _ = self._string(text, position)
+            elif type_name == "boolean":
+                result, position = self._boolean(text, position)
+            else:
+                result, position = self._number(
+                    text, position, integer=type_name == "integer"
+                )
+            if result != 0:
+                return result
+
+            position = self._spaces(text, position)
+            if position == len(text):
+                return -1
+            if text[position] == "}":
+                position += 1
+                position = self._spaces(text, position)
+                if position != len(text):
+                    return -2
+                return 0 if used == self.parameters.keys() else -2
+            if text[position] != "," or len(used) == len(self.parameters):
+                return -2
+            position += 1
+            need_key = True
 
 
 class ParametersGenerator(BaseModel):
-    def __get_numbers_from_prompt(self, prompt: str) -> list[str]:
-        return re.findall(r"-?\d+(?:\.\d+)?", prompt)
 
-    def __get_integers_from_prompt(self, prompt: str) -> str:
-        return re.findall(r"-?\d+", prompt)
+    MAX_TOKENS: ClassVar[int] = 512
 
-    def __get_next_token_id(
-        self,
-        llm: Small_LLM_Model,
-        current_context: list[int],
-        tokenized_answer: list[int],
-        token_ids: list[int],
-    ):
-        logits = llm.get_logits_from_input_ids(
-            current_context + tokenized_answer
-        )
-        if isinstance(token_ids, list):
-            return max(
-                token_ids,
-                key=lambda token_id: logits[token_id],
-            )
-        return token_ids
-
-    def __check_escape_state(self,
-                             str_answer: str,
-                             allowed_chars: list[str]) -> str:
-        escape_state = False
-        for char in str_answer:
-            if char == "\\":
-                escape_state = not escape_state
-            else:
-                if escape_state:
-                    if char in allowed_chars:
-                        if char.lower() != "x" and char != "u":
-                            escape_state = not escape_state
-                else:
-                    continue
-        return escape_state
-
-    def __escape_state(
-        self, llm: Small_LLM_Model, tokenized_context: list[int],
-        tokenized_answer: list[int], next_token_id: int
-    ) -> str:
-        if self.__check_if_string_end(llm, tokenized_answer,
-                                      next_token_id):
-            to_check = llm.decode(next_token_id)
-            last_bit = to_check[:to_check.find('"')]
-            next_token_id = llm.encode(last_bit)[0].tolist()
-            for token_id in next_token_id:
-                tokenized_answer.append(token_id)
-            return "end"
-        else:
-            tokenized_answer.append(next_token_id)
-        str_answer = llm.decode(tokenized_answer)
-        allowed_chars = [
-            '"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u'
-        ]
-        allowed_ids = [llm.encode(char)[0].tolist()[0]
-                       for char in allowed_chars]
-        allowed_ids += [token_id for token_id in range(151927)
-                        if "\\" in llm.decode(token_id)]
-        while self.__check_escape_state(str_answer, allowed_chars):
-            tokenized_answer.append(self.__get_next_token_id(
-                llm, tokenized_context, tokenized_answer,
-                allowed_ids
-            ))
-            str_answer = llm.decode(tokenized_answer)
-            if str_answer[-1].lower() == 'u':
-                allowed_ids = [
-                    "0", "1", "2", "3", "4", "5",
-                    "6", "7", "8", "9"
-                ]
-                for _ in range(4):
-                    tokenized_answer.append(self.__get_next_token_id(
-                        llm, tokenized_context, tokenized_answer,
-                        allowed_ids
-                    ))
-                str_answer = llm.decode(tokenized_answer)
-            print(str_answer)
-        return "continue"
-
-    def __check_if_string_end(self, llm: Small_LLM_Model,
-                              tokenized_answer: list[int],
-                              next_token_id: int) -> bool:
-        str_answer = llm.decode(tokenized_answer + [next_token_id])
-        for i, char in enumerate(str_answer):
-            if '"' in char:
-                if (i == 0 or self.__check_escape_state(str_answer[:i + 1])
-                   is False):
-                    return True
-                else:
-                    continue
-        return False
-
-    def __get_string_value(
-        self, llm: Small_LLM_Model, tokenized_context: list[int]
-    ) -> str:
-        true_context = tokenized_context + llm.encode('"')[0].tolist()
-        tokenized_answer = []
-        allowed_ids = [token_id for token_id in range(151927)]
-        while True:
-            next_token_id = self.__get_next_token_id(
-                llm, true_context, tokenized_answer, allowed_ids
-            )
-            str_token = llm.decode(next_token_id)
-            if "\\" in str_token:
-                if self.__escape_state(llm, tokenized_context,
-                                       tokenized_answer,
-                                       next_token_id) == "end":
-                    break
-            elif '"' in str_token:
-                if '"' in str_token:
-                    to_check = str_token
-                    last_bit = to_check[:to_check.find('"')]
-                    next_token_id = llm.encode(last_bit)[0].tolist()
-                    for token_id in next_token_id:
-                        tokenized_answer.append(token_id)
-                break
-            else:
-                tokenized_answer.append(next_token_id)
-        raw_string = llm.decode(tokenized_answer)
-        print(raw_string)
-        return raw_string
-
-    def __get_number_value(
-        self, llm: Small_LLM_Model, tokenized_context: list[int]
-    ) -> float:
-        tokenized_answer = []
-        while True:
-            allowed_ids = llm.encode(",")[0].tolist()
-            for integer_ids in self.__numbers_ids:
-                if (len(tokenized_answer) < len(integer_ids)
-                    and tokenized_answer == integer_ids[:len(tokenized_answer)
-                                                        ]):
-                    allowed_ids.append(integer_ids[len(tokenized_answer)])
-            next_token_id = self.__get_next_token_id(
-                llm, tokenized_context, tokenized_answer, allowed_ids
-            )
-            if "," in llm.decode(next_token_id):
-                token = llm.decode(next_token_id)
-                last_bit = token[: token.find(",")]
-                next_token_id = llm.encode(last_bit)[0].tolist()
-                for token_id in next_token_id:
-                    tokenized_answer.append(token_id)
-                break
-            tokenized_answer.append(next_token_id)
-        number_str = llm.decode(tokenized_answer)
+    @staticmethod
+    @lru_cache(maxsize=4)
+    def _vocabulary_ids(path: str) -> tuple[int, ...]:
         try:
-            converted_number = int(number_str)
-        except ValueError:
-            converted_number = float(number_str)
-        return converted_number
+            with Path(path).open(encoding="utf-8") as file:
+                vocabulary = json.load(file)
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise ValueError(f"Cannot read vocabulary: {path}") from error
+        if not isinstance(vocabulary, dict):
+            raise ValueError("Vocabulary must be a JSON object")
+        ids = {
+            value for value in vocabulary.values()
+            if type(value) is int and value >= 0
+        }
+        if not ids:
+            raise ValueError("Vocabulary has no valid token IDs")
+        return tuple(sorted(ids))
 
-    def __get_boolean_value(
-        self, llm: Small_LLM_Model, tokenized_context: list[int]
-    ) -> float:
-        tokenized_answer = []
-        bools_ids = [llm.encode(value)[0].tolist() for value in ["true",
-                                                                 "false"]]
-        while True:
-            allowed_ids = []
-            for bool_id in bools_ids:
-                if (len(tokenized_answer) < len(bool_id)
-                   and tokenized_answer == bool_id[:len(tokenized_answer)]):
-                    allowed_ids.append(bool_id[len(tokenized_answer)])
-            next_token_id = self.__get_next_token_id(
-                llm, tokenized_context, tokenized_answer, allowed_ids
-            )
-            tokenized_answer.append(next_token_id)
-            if tokenized_answer in bools_ids:
-                break
-        return llm.decode(tokenized_answer) == "true"
+    @staticmethod
+    def _validate(arguments: object, func: Function) -> dict[str, Any]:
+        if not isinstance(arguments, dict):
+            raise ValueError("Generated arguments must be an object")
+        if set(arguments) != set(func.parameters):
+            raise ValueError("Generated argument names do not match")
 
-    def __get_integer_value(
-        self, llm: Small_LLM_Model, tokenized_context: list[int]
-    ) -> float:
-        tokenized_answer = []
-        while True:
-            allowed_ids = llm.encode(",")[0].tolist()
-            for number_ids in self.__integers_ids:
-                if (len(tokenized_answer) < len(number_ids)
-                    and tokenized_answer == number_ids[:len(tokenized_answer)
-                                                       ]):
-                    allowed_ids.append(number_ids[len(tokenized_answer)])
-            next_token_id = self.__get_next_token_id(
-                llm, tokenized_context, tokenized_answer, allowed_ids
-            )
-            if "," in llm.decode(next_token_id):
-                token = llm.decode(next_token_id)
-                last_bit = token[: token.find(",")]
-                next_token_id = llm.encode(last_bit)[0].tolist()
-                for token_id in next_token_id:
-                    tokenized_answer.append(token_id)
-                break
-            tokenized_answer.append(next_token_id)
-        number_str = llm.decode(tokenized_answer)
-        if int(number_str) == float(number_str):
-            return int(number_str)
-        else:
-            return float(number_str)
+        result: dict[str, Any] = {}
+        for name, definition in func.parameters.items():
+            value = arguments[name]
+            kind = definition.type
+            if kind == "string":
+                valid = isinstance(value, str)
+            elif kind == "boolean":
+                valid = type(value) is bool
+            elif kind == "integer":
+                valid = type(value) is int
+            elif kind == "number":
+                valid = type(value) in (int, float)
+                if valid:
+                    value = float(value)
+                    valid = math.isfinite(value)
+            else:
+                raise ValueError(f"Unsupported type: {kind}")
+            if not valid:
+                raise ValueError(f"Invalid value for {name!r}: {kind}")
+            result[name] = value
+        return result
 
     def generate(
         self,
         func: Function,
-        prompt: str,
         llm: Small_LLM_Model,
         tokenized_context: list[int],
     ) -> dict[str, Any]:
-        print(func.name, prompt)
-        parameters = list(func.parameters.keys())
-        dict_parameters = {}
-        value_funcs = {
-            "string": self.__get_string_value,
-            "number": self.__get_number_value,
-            "boolean": self.__get_boolean_value,
-            "integer": self.__get_integer_value
-        }
-        values_types = [
-            func.parameters[parameter].type for parameter in parameters
-        ]
-        if "number" in values_types or "integer" in values_types:
-            if "number" in values_types:
-                self.__numbers_ids = []
-                for number in self.__get_numbers_from_prompt(prompt):
-                    self.__numbers_ids.append(llm.encode(number)[0].tolist())
-            if "integer" in values_types:
-                self.__integers_ids = []
-                for integer in self.__get_integers_from_prompt(prompt):
-                    self.__integers_ids.append(llm.encode(integer)[0].tolist())
-        for parameter in parameters:
-            dict_parameters[parameter] = ""
-            str_dict = json.dumps(dict_parameters)
-            str_dict = str_dict[:-3]
-            dict_parameters[parameter] = value_funcs[
-                func.parameters[parameter].type
-            ](llm, tokenized_context + llm.encode(str_dict)[0].tolist())
-            print(dict_parameters)
-        return dict_parameters
+        if not func.parameters:
+            return {}
+
+        checker = JsonPrefixChecker(parameters={
+            name: definition.type
+            for name, definition in func.parameters.items()
+        })
+        try:
+            vocabulary_ids = self._vocabulary_ids(
+                llm.get_path_to_vocab_file()
+            )
+        except Exception as error:
+            raise ValueError("Could not load model vocabulary") from error
+        generated_ids = llm.encode("{")[0].tolist()
+        for _ in range(self.MAX_TOKENS):
+            logits = llm.get_logits_from_input_ids(
+                tokenized_context + generated_ids
+            )
+            options = [
+                (-logits[token_id], token_id)
+                for token_id in vocabulary_ids
+                if token_id < len(logits)
+                and math.isfinite(logits[token_id])
+            ]
+            heapq.heapify(options)
+            previous_text = llm.decode(generated_ids)
+
+            while options:
+                _, token_id = heapq.heappop(options)
+                next_ids = generated_ids + [token_id]
+                text = llm.decode(next_ids)
+                if text == previous_text and not text.endswith("\ufffd"):
+                    continue
+
+                state = checker.status(text)
+                if state == -2 and text.endswith("\ufffd"):
+                    if checker.status(text.rstrip("\ufffd")) == -1:
+                        state = -1
+                if state == -2:
+                    continue
+
+                if state == 0:
+                    try:
+                        arguments = json.loads(text)
+                        return self._validate(arguments, func)
+                    except (ValueError, OverflowError):
+                        continue
+                generated_ids.append(token_id)
+                break
+            else:
+                raise ValueError("No token can continue the JSON")
+
+        raise ValueError("JSON generation exceeded the token limit")

@@ -35,7 +35,7 @@ def main() -> None:
         sys.exit(3)
     except ValidationError as valid_errs:
         for err in valid_errs.errors():
-            print(Fore.RED, f"ERROR: {err['input']} is not valid",
+            print(Fore.RED, f"ERROR: {repr(err['input'])} is not valid",
                   Style.RESET_ALL)
         sys.exit(4)
     except ValueError as val_err:

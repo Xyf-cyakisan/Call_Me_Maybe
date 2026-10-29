@@ -14,7 +14,12 @@ class JSONParser(BaseModel):
     def __read_json_file(self, file_name: str) -> Any:
         try:
             with open(file_name, encoding="utf-8") as json_file:
-                return json.load(json_file)
+                return json.load(
+                                 json_file,
+                                 object_pairs_hook=(
+                                     self.__check_duplicate_parameters
+                                     )
+                )
         except UnicodeDecodeError:
             raise ValueError(
                 f"Invalid UTF-8 file '{file_name}'"
@@ -42,14 +47,32 @@ class JSONParser(BaseModel):
             raise PermissionError(f"Cannot access file '{path}' because "
                                   "of permissions")
 
+    def __check_duplicate_parameters(self, parameters: list[tuple[str, object]
+                                                            ]) -> dict[str,
+                                                                       object]:
+        dict_parameters: dict[str, object] = {}
+        for key, value in parameters:
+            if key in dict_parameters:
+                raise ValueError(f"Duplicate JSON key: '{key}'")
+            dict_parameters[key] = value
+        return dict_parameters
+
+    def __check_duplicate_func_name(self, funcs: list[Function]) -> None:
+        if len([func.name for func in funcs]) != len(set([func.name
+                                                          for func in
+                                                          funcs])):
+            raise ValueError(f"File {self.func_definition_file_name} has "
+                             "multiple functions named the same.")
+
     def parse(
-            self) -> tuple[list[Prompt], list[Function]]:
+            self) -> tuple[list[Function], list[Prompt]]:
+        func_def_file = self.__read_json_file(self.func_definition_file_name)
         objects = (
             [Function(**func_def)
-             for func_def in self.__read_json_file(
-                self.func_definition_file_name)],
+             for func_def in func_def_file],
             [Prompt(**prompt) for prompt in self.__read_json_file(
                 self.calling_tests_file_name)]
         )
+        self.__check_duplicate_func_name(objects[0])
         self.__create_output_file()
         return objects

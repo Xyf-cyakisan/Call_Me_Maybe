@@ -1,14 +1,10 @@
-mypy et flake8
-verifier que le makefile est bon
-verifier que le projet est bien poo
-faire plus de tests
-faire en sorte que ca ecrit dans le json plus proprement
-demander a copilot de tout verifier selon le sujet
-le readme
-verifier que que ce qui est necessaire est rendu et pas des fichier inutiles
-verifier que tous els tokens c'est bien 151000 je sais pas quoi la
 proteger les imports
 donner -infini aux tokens invaldies
-revoir la deduction des noms de fonctions
-non empty string en key
 remet les inputs files par defaut
+tester les flags
+tester rapidite prjet
+mypy et flake8
+le readme
+comprendre le parameters_models
+verifier que que ce qui est necessaire est rendu et pas des fichier inutiles
+demander a copilot de tout verifier selon le sujet

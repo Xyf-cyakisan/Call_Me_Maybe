@@ -1,4 +1,5 @@
 from argparse import Namespace
+from typing import Any
 from pydantic import BaseModel
 from .input_models import Function, Prompt
 from .JSONParser import JSONParser
@@ -22,12 +23,15 @@ class CallMeMaybeApplication(BaseModel):
         self.__orchestrator = LLMOrchestrator(functions=functions,
                                               prompts=prompts)
 
+    def __write_output(self, result: list[dict[str, Any]]) -> None:
+        with open(self.__parser.calls_json_file_name, "w") as output_json:
+            json.dump(result,
+                      output_json, indent=4)
+
     def run(self) -> None:
         self.__create_parser()
         funcs, prompts = self.__parser.parse()
         self.__create_orchestrator(funcs, prompts)
         result = [call.model_dump(mode="json") for call
                   in self.__orchestrator.run_llm()]
-        with open(self.__parser.calls_json_file_name, "w") as output_json:
-            json.dump(result,
-                      output_json, indent=4)
+        self.__write_output(result)

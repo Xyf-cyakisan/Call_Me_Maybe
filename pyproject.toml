@@ -4,16 +4,17 @@ version = "0.1.0"
 description = "Function calling with constrained decoding for small language models"
 requires-python = ">=3.10"
 dependencies = [
-    "huggingface-hub>=0.20.0",
+    "llm_sdk",
     "numpy",
     "pydantic",
-    "torch>=2.0.0",
-    "transformers>=4.40.0",
     "flake8>=7.3.0",
     "mypy>=2.1.0",
     "pydantic>=2.14.1",
     "argparse>=1.4.0",
-    "colorama>=0.4.6"
+    "colorama>=0.4.6",
+    "torch",
+    "transformers",
+    "huggingface-hub"
 ]
 
 [tool.uv.sources]
@@ -23,3 +24,8 @@ torch = { index = "pytorch-cpu" }
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
+
+[tool.mypy]
+[[tool.mypy.overrides]]
+module = ["colorama", "colorama.*"]
+ignore_missing_imports = true

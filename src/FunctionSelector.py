@@ -6,7 +6,7 @@ from .input_models import Function
 class FunctionSelector(BaseModel):
     def __set_tokenized_funcs(self,
                               llm: Small_LLM_Model,
-                              functions: list[Function]) -> str:
+                              functions: list[Function]) -> None:
         self.__tokenized_funcs: dict[str, list[int]] = {
             func.name: llm.encode(func.name + '\n')[0].tolist()
             for func in functions}
@@ -17,7 +17,7 @@ class FunctionSelector(BaseModel):
 
         self.__set_tokenized_funcs(llm, functions)
         tokenized_context = llm.encode(context)[0].tolist()
-        tokenized_answer = []
+        tokenized_answer: list[int] = []
         while True:
             allowed_ids = []
             logits = llm.get_logits_from_input_ids(
@@ -28,9 +28,17 @@ class FunctionSelector(BaseModel):
                     and tokenized_answer == tokened_func[:len(tokenized_answer)
                                                          ]):
                     allowed_ids.append(tokened_func[len(tokenized_answer)])
-            next_token_id = logits.index((max([logits[allowed_id]
-                                               for allowed_id in
-                                               allowed_ids])))
+            if not allowed_ids:
+                raise ValueError("No valid token can continue a function"
+                                 f"name. {llm.decode(tokenized_answer)}")
+            allowed_set = set(allowed_ids)
+            for token_id in range(len(logits)):
+                if token_id not in allowed_set:
+                    logits[token_id] = float("-inf")
+            next_token_id = max(
+                range(len(logits)),
+                key=lambda token_id: logits[token_id]
+            )
             tokenized_answer.append(next_token_id)
             if tokenized_answer in self.__tokenized_funcs.values():
                 str_func = llm.decode(tokenized_answer[:-1])

@@ -135,30 +135,30 @@ class LLMOrchestrator(BaseModel):
         self.__set_llm()
         self.__set_function_selector()
         self.__set_parameters_generator()
-        functions_calls_data = {
-            "funcs_name": [],
-            "prompts": [],
-            "parameters": []
-        }
+        funcs_name: list[str] = []
+        prompts: list[str] = []
+        parameters: list[dict[str, Any]] = []
         needed_funcs = []
         for func_name_context in self.__build_funcs_name_contexts():
-            functions_calls_data["funcs_name"].append(
+            funcs_name.append(
                 self.__function_selector.get_func_name(
                     self.get_llm(), func_name_context, self.functions))
             for func in self.functions:
-                if functions_calls_data["funcs_name"][-1] == func.name:
+                if funcs_name[-1] == func.name:
                     needed_funcs.append(func)
                     break
         for func, prompt in zip(needed_funcs, self.prompts):
-            parameters = list(func.parameters.keys())
+            parameters_name = list(func.parameters.keys())
             tokenized_context = self.__llm.encode(
              self.build_argument_context(
                 prompt,
                 func,
-                parameters))[0].tolist()
+                parameters_name))[0].tolist()
             result = self.__parameters_generator.generate(
-                func, prompt.prompt, self.get_llm(), tokenized_context)
-            functions_calls_data["parameters"].append(result)
+                func, self.get_llm(), tokenized_context)
+            parameters.append(result)
         for prompt in self.prompts:
-            functions_calls_data["prompts"].append(prompt.prompt)
-        return (self.__create_functions_calls_objects(**functions_calls_data))
+            prompts.append(prompt.prompt)
+        return (self.__create_functions_calls_objects(funcs_name,
+                                                      prompts,
+                                                      parameters))
