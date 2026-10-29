@@ -43,7 +43,7 @@ def main() -> None:
         sys.exit(5)
     except KeyboardInterrupt:
         print(Fore.BLUE, "Bye-bye", Style.RESET_ALL)
-        sys.exit(5)
+        sys.exit(6)
 
 
 if __name__ == "__main__":

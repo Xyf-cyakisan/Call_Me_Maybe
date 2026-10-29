@@ -1,6 +1,6 @@
 from argparse import Namespace
 from pydantic import BaseModel
-from .models import Function, Prompt
+from .input_models import Function, Prompt
 from .JSONParser import JSONParser
 from .LLMOrchestrator import LLMOrchestrator
 import json

@@ -1,8 +1,8 @@
 from pydantic import BaseModel
 import json
 from typing import Any
-from .models import Prompt
-from .models import Function
+from .input_models import Prompt
+from .input_models import Function
 from pathlib import Path
 
 
