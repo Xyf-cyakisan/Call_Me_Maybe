@@ -3,7 +3,6 @@ import json
 from typing import Any
 from .input_models import Prompt
 from .input_models import Function
-from pathlib import Path
 
 
 class JSONParser(BaseModel):
@@ -14,12 +13,15 @@ class JSONParser(BaseModel):
     def __read_json_file(self, file_name: str) -> Any:
         try:
             with open(file_name, encoding="utf-8") as json_file:
-                return json.load(
+                loaded = json.load(
                                  json_file,
                                  object_pairs_hook=(
                                      self.__check_duplicate_parameters
                                      )
                 )
+                if not isinstance(loaded, list):
+                    raise ValueError(f"'{file_name}' is not a JSON array")
+                return loaded
         except UnicodeDecodeError:
             raise ValueError(
                 f"Invalid UTF-8 file '{file_name}'"
@@ -33,18 +35,6 @@ class JSONParser(BaseModel):
             raise FileNotFoundError(f"File '{file_name}' not found")
         except PermissionError:
             raise PermissionError(f"Cannot access file '{file_name}' because "
-                                  "of permissions")
-
-    def __create_output_file(self) -> None:
-        if not self.calls_json_file_name.lower().endswith(".json"):
-            raise ValueError("Filename must have a .json extension")
-        path = Path(self.calls_json_file_name)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with path.open("w") as output_f:
-                output_f.write("")
-        except PermissionError:
-            raise PermissionError(f"Cannot access file '{path}' because "
                                   "of permissions")
 
     def __check_duplicate_parameters(self, parameters: list[tuple[str, object]
@@ -67,12 +57,25 @@ class JSONParser(BaseModel):
     def parse(
             self) -> tuple[list[Function], list[Prompt]]:
         func_def_file = self.__read_json_file(self.func_definition_file_name)
+        prompt_def_file = self.__read_json_file(self.calling_tests_file_name)
+        for index, func_def in enumerate(func_def_file):
+            if not isinstance(func_def, dict):
+                raise ValueError(
+                    f"Function definition at index {index} must be a JSON"
+                    " object"
+                )
+
+        for index, prompt in enumerate(prompt_def_file):
+            if not isinstance(prompt, dict):
+                raise ValueError(
+                    f"Prompt at index {index} must be a JSON object"
+                )
         objects = (
             [Function(**func_def)
              for func_def in func_def_file],
-            [Prompt(**prompt) for prompt in self.__read_json_file(
-                self.calling_tests_file_name)]
+            [Prompt(**prompt) for prompt in prompt_def_file]
         )
+        if not objects[0]:
+            raise ValueError(f"'{self.func_definition_file_name}' is empty")
         self.__check_duplicate_func_name(objects[0])
-        self.__create_output_file()
         return objects

@@ -2,8 +2,13 @@ from .CallMeMaybeApplication import CallMeMaybeApplication
 import sys
 import json
 from argparse import ArgumentParser
-from pydantic import ValidationError
-from colorama import Fore, Style
+try:
+    from pydantic import ValidationError
+    from colorama import Fore, Style
+except ImportError:
+    print("ERROR: all dependencies are not installed, please run 'uv sync'"
+          " before starting the program.")
+    sys.exit(7)
 
 
 def main() -> None:
@@ -44,6 +49,9 @@ def main() -> None:
     except KeyboardInterrupt:
         print(Fore.BLUE, "Bye-bye", Style.RESET_ALL)
         sys.exit(6)
+    except Exception as err:
+        print(Fore.RED + f"Unexpected ERROR: {err}" + Style.RESET_ALL)
+        sys.exit(8)
 
 
 if __name__ == "__main__":

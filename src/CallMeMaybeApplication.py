@@ -5,6 +5,7 @@ from .input_models import Function, Prompt
 from .JSONParser import JSONParser
 from .LLMOrchestrator import LLMOrchestrator
 import json
+from pathlib import Path
 
 
 class CallMeMaybeApplication(BaseModel):
@@ -28,10 +29,23 @@ class CallMeMaybeApplication(BaseModel):
             json.dump(result,
                       output_json, indent=4)
 
+    def __create_output_file(self) -> None:
+        if not self.__parser.calls_json_file_name.lower().endswith(".json"):
+            raise ValueError("Filename must have a .json extension")
+        path = Path(self.__parser.calls_json_file_name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with path.open("w") as output_f:
+                output_f.write("")
+        except PermissionError:
+            raise PermissionError(f"Cannot access file '{path}' because "
+                                  "of permissions")
+
     def run(self) -> None:
         self.__create_parser()
         funcs, prompts = self.__parser.parse()
         self.__create_orchestrator(funcs, prompts)
         result = [call.model_dump(mode="json") for call
                   in self.__orchestrator.run_llm()]
+        self.__create_output_file()
         self.__write_output(result)

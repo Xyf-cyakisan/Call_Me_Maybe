@@ -33,7 +33,7 @@ debug:
 	uv run python -m pdb -m src $(ARGS)
 
 lint: install
-	uv run python -m flake8 src --exclude=.venv && printf '\033[1;32mFlake8 all good !\033[0m\n'; uv run python -m mypy src --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs --follow-imports=silent
+	uv run python -m flake8 . && printf '\033[1;32mFlake8 all good !\033[0m\n'; uv run python -m mypy . --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs --follow-imports=silent
 
 lint-strict: install
-	uv run python -m flake8 src --exclude=.venv && printf '\033[1;32mFlake8 all good !\033[0m\n'; uv run python -m mypy src --strict --follow-imports=silent
+	uv run python -m flake8 . && printf '\033[1;32mFlake8 all good !\033[0m\n'; uv run python -m mypy . --strict --follow-imports=silent

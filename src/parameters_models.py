@@ -1,16 +1,12 @@
-"""Generate schema-compliant JSON arguments with constrained decoding."""
-
 import heapq
 import json
 import math
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, ClassVar
-
 from llm_sdk import Small_LLM_Model
-from pydantic import BaseModel, field_validator
-
 from .input_models import Function
+from pydantic import BaseModel, field_validator
 
 
 class JsonPrefixChecker(BaseModel):
@@ -34,7 +30,6 @@ class JsonPrefixChecker(BaseModel):
 
     @staticmethod
     def _string(text: str, position: int) -> tuple[int, int, str]:
-        """Return (status, next position, decoded value)."""
         if position == len(text):
             return -1, position, ""
         if text[position] != '"':
@@ -72,7 +67,6 @@ class JsonPrefixChecker(BaseModel):
 
     @staticmethod
     def _number(text: str, position: int, integer: bool) -> tuple[int, int]:
-        """Validate JSON number syntax, requiring a following separator."""
         size = len(text)
         if position == size:
             return -1, position
@@ -122,7 +116,6 @@ class JsonPrefixChecker(BaseModel):
 
     @staticmethod
     def _boolean(text: str, position: int) -> tuple[int, int]:
-        """Check the prefix of a true/false literal."""
         expected = "true" if text[position:position + 1] == "t" else "false"
         for char in expected:
             if position == len(text):
@@ -135,7 +128,6 @@ class JsonPrefixChecker(BaseModel):
         return 0, position
 
     def _possible_key(self, text: str, used: set[str]) -> bool:
-        """Reject impossible plain prefixes; defer unfinished escapes."""
         plain = text.split("\\", 1)[0]
         return any(
             name not in used and name.startswith(plain)
@@ -143,7 +135,6 @@ class JsonPrefixChecker(BaseModel):
         )
 
     def status(self, text: str) -> int:
-        """0: complete; -1: valid unfinished prefix; -2: impossible."""
         position = self._spaces(text, 0)
         if position == len(text):
             return -1

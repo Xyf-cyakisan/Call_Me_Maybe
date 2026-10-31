@@ -1,20 +1,17 @@
 [project]
-name = "call-me-maybe"
+name = "llm-sdk"
 version = "0.1.0"
-description = "Function calling with constrained decoding for small language models"
+description = "LLM SDK for local model inference"
 requires-python = ">=3.10"
 dependencies = [
-    "huggingface-hub>=0.20.0",
-    "numpy",
-    "pydantic",
     "torch>=2.0.0",
     "transformers>=4.40.0",
+    "huggingface-hub>=0.20.0",
 ]
 
-[tool.uv.sources]
-torch = { index = "pytorch-cpu" }
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
+[tool.hatch.build.targets.wheel]
+packages = ["llm_sdk"]

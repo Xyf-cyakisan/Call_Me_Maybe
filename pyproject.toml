@@ -12,12 +12,14 @@ dependencies = [
     "pydantic>=2.14.1",
     "argparse>=1.4.0",
     "colorama>=0.4.6",
+    "types-colorama",
     "torch",
     "transformers",
     "huggingface-hub"
 ]
 
 [tool.uv.sources]
+llm_sdk = { path = "llm_sdk" }
 torch = { index = "pytorch-cpu" }
 
 [[tool.uv.index]]
@@ -27,5 +29,10 @@ explicit = true
 
 [tool.mypy]
 [[tool.mypy.overrides]]
-module = ["colorama", "colorama.*"]
-ignore_missing_imports = true
+module = [
+    "colorama",
+    "colorama.*",
+    "llm_sdk",
+    "llm_sdk.*",
+]
+ignore_errors = true
